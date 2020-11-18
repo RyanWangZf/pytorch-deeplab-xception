@@ -105,3 +105,8 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# dataset
+data/pascal/*
+data/construction/image_npy/*
+data/construction/label_npy/*

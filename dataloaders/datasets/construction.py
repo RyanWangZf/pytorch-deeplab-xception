@@ -1,22 +1,24 @@
 from __future__ import print_function, division
 import os
+import sys
 from PIL import Image
 import numpy as np
 from torch.utils.data import Dataset
 from mypath import Path
 from torchvision import transforms
 from dataloaders import custom_transforms as tr
-import pdb
 
-class VOCSegmentation(Dataset):
+
+class ConstructionSegmentation(Dataset):
     """
-    PascalVoc dataset
+    Construction-Site-Segmentation Dataset.
+    https://github.com/RyanWangZf/construction-site-segmentation
     """
-    NUM_CLASSES = 21
+    NUM_CLASSES = 12
 
     def __init__(self,
                  args,
-                 base_dir=Path.db_root_dir('pascal'),
+                 base_dir=Path.db_root_dir('construction'),
                  split='train',
                  ):
         """
@@ -26,8 +28,8 @@ class VOCSegmentation(Dataset):
         """
         super().__init__()
         self._base_dir = base_dir
-        self._image_dir = os.path.join(self._base_dir, 'JPEGImages')
-        self._cat_dir = os.path.join(self._base_dir, 'SegmentationClass')
+        self._image_dir = os.path.join(self._base_dir, 'image_npy')
+        self._cat_dir = os.path.join(self._base_dir, 'label_npy')
 
         if isinstance(split, str):
             self.split = [split]
@@ -37,7 +39,9 @@ class VOCSegmentation(Dataset):
 
         self.args = args
 
-        _splits_dir = os.path.join(self._base_dir, 'ImageSets', 'Segmentation')
+        # _splits_dir = os.path.join(self._base_dir, 'ImageSets', 'Segmentation')
+        _splits_dir = self._base_dir
+
         self.im_ids = []
         self.images = []
         self.categories = []
@@ -47,8 +51,8 @@ class VOCSegmentation(Dataset):
                 lines = f.read().splitlines()
 
             for ii, line in enumerate(lines):
-                _image = os.path.join(self._image_dir, line + ".jpg")
-                _cat = os.path.join(self._cat_dir, line + ".png")
+                _image = os.path.join(self._image_dir, line)
+                _cat = os.path.join(self._cat_dir, line)
                 assert os.path.isfile(_image)
                 assert os.path.isfile(_cat)
                 self.im_ids.append(line)
@@ -60,9 +64,9 @@ class VOCSegmentation(Dataset):
         # Display stats
         print('Number of images in {}: {:d}'.format(split, len(self.images)))
 
+
     def __len__(self):
         return len(self.images)
-
 
     def __getitem__(self, index):
         _img, _target = self._make_img_gt_point_pair(index)
@@ -76,9 +80,10 @@ class VOCSegmentation(Dataset):
 
 
     def _make_img_gt_point_pair(self, index):
-        _img = Image.open(self.images[index]).convert('RGB')
-        _target = Image.open(self.categories[index])
-
+        _img = np.load(self.images[index], allow_pickle=True)
+        _img = Image.fromarray(_img)
+        _target = np.load(self.categories[index], allow_pickle=True)
+        _target = Image.fromarray(_target)
         return _img, _target
 
     def transform_tr(self, sample):
@@ -101,8 +106,7 @@ class VOCSegmentation(Dataset):
         return composed_transforms(sample)
 
     def __str__(self):
-        return 'VOC2012(split=' + str(self.split) + ')'
-
+        return 'Construction-Site-Segmentation(split=' + str(self.split) + ')'
 
 if __name__ == '__main__':
     from dataloaders.utils import decode_segmap
@@ -115,7 +119,7 @@ if __name__ == '__main__':
     args.base_size = 513
     args.crop_size = 513
 
-    voc_train = VOCSegmentation(args, split='train')
+    voc_train = ConstructionSegmentation(args, split='train')
 
     dataloader = DataLoader(voc_train, batch_size=5, shuffle=True, num_workers=0)
 
@@ -141,5 +145,3 @@ if __name__ == '__main__':
             break
 
     plt.show(block=True)
-
-
