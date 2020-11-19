@@ -14,8 +14,9 @@ def make_data_loader(args, **kwargs):
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, **kwargs)
         val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, **kwargs)
         test_loader = None
+        count_stats = {"num_train": len(train_set), "num_test": len(val_set), "num_class": num_class}
 
-        return train_loader, val_loader, test_loader, num_class
+        return train_loader, val_loader, test_loader, num_class, count_stats
 
     elif args.dataset == 'cityscapes':
         train_set = cityscapes.CityscapesSegmentation(args, split='train')
@@ -25,8 +26,9 @@ def make_data_loader(args, **kwargs):
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, **kwargs)
         val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, **kwargs)
         test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=False, **kwargs)
+        count_stats = {"num_train": len(train_set), "num_test": len(val_set), "num_class": num_class}
 
-        return train_loader, val_loader, test_loader, num_class
+        return train_loader, val_loader, test_loader, num_class, count_stats
 
     elif args.dataset == 'coco':
         train_set = coco.COCOSegmentation(args, split='train')
@@ -35,7 +37,9 @@ def make_data_loader(args, **kwargs):
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, **kwargs)
         val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, **kwargs)
         test_loader = None
-        return train_loader, val_loader, test_loader, num_class
+        count_stats = {"num_train": len(train_set), "num_test": len(val_set), "num_class": num_class}
+
+        return train_loader, val_loader, test_loader, num_class, count_stats
 
     elif args.dataset == 'construction':
         train_set = construction.ConstructionSegmentation(args, split='train')
@@ -44,7 +48,8 @@ def make_data_loader(args, **kwargs):
         train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, **kwargs)
         val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False, **kwargs)
         test_loader = None
-        return train_loader, val_loader, test_loader, num_class
+        count_stats = {"num_train": len(train_set), "num_test": len(val_set), "num_class": num_class}
+        return train_loader, val_loader, test_loader, num_class, count_stats
 
     else:
         raise NotImplementedError

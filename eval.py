@@ -3,6 +3,8 @@ import os
 import numpy as np
 from tqdm import tqdm
 import pdb
+import torch
+import time
 
 from mypath import Path
 from dataloaders import make_data_loader
@@ -15,7 +17,7 @@ from utils.saver import Saver
 from utils.summaries import TensorboardSummary
 from utils.metrics import Evaluator
 
-class Trainer(object):
+class Evaluater(object):
     def __init__(self, args):
         self.args = args
 
@@ -73,19 +75,7 @@ class Trainer(object):
         # Resuming checkpoint
         self.best_pred = 0.0
         if args.resume is not None:
-            if not os.path.isfile(args.resume):
-                raise RuntimeError("=> no checkpoint found at '{}'" .format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            if args.cuda:
-                self.model.module.load_state_dict(checkpoint['state_dict'])
-            else:
-                self.model.load_state_dict(checkpoint['state_dict'])
-            if not args.ft:
-                self.optimizer.load_state_dict(checkpoint['optimizer'])
-            self.best_pred = checkpoint['best_pred']
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+            self.load_ckpt(args.resume)
 
         # Clear start epoch if fine-tuning
         if args.ft:
@@ -128,6 +118,65 @@ class Trainer(object):
                 'optimizer': self.optimizer.state_dict(),
                 'best_pred': self.best_pred,
             }, is_best)
+
+    def evaluate(self):
+        """Take evaluation on the dataset to get IoU per class.
+        """
+        print("evaluate the stored model on test dataset.")
+        self.model.eval()
+        self.evaluator.reset()
+        tbar = tqdm(self.val_loader, desc='\r')
+        test_loss = 0.0
+
+        # compute the time consumption
+        start_time = time.time()
+        for i, sample in enumerate(tbar):
+            image, target = sample['image'], sample['label']
+            if self.args.cuda:
+                image, target = image.cuda(), target.cuda()
+            with torch.no_grad():
+                output = self.model(image)
+            loss = self.criterion(output, target)
+            test_loss += loss.item()
+            tbar.set_description('Test loss: %.3f' % (test_loss / (i + 1)))
+            pred = output.data.cpu().numpy()
+            target = target.cpu().numpy()
+            pred = np.argmax(pred, axis=1)
+            # Add batch sample into evaluator
+            self.evaluator.add_batch(target, pred)
+        
+        time_cost = time.time() - start_time
+        print("test process costs {:.1f} sec for {} images".format(time_cost, self.data_stats["num_test"]))
+
+        # obtain the test result
+        Acc = self.evaluator.Pixel_Accuracy()
+        Acc_class = self.evaluator.Pixel_Accuracy_Class()
+        mIoU = self.evaluator.Mean_Intersection_over_Union()
+        IoU_class = self.evaluator.Mean_Intersection_over_Union_class()
+        FWIoU = self.evaluator.Frequency_Weighted_Intersection_over_Union()
+        print("Acc:{}, Acc_class:{}, mIoU:{}, fwIoU: {}".format(Acc, Acc_class, mIoU, FWIoU))
+        print('Loss: %.3f' % test_loss)
+        for i, iou in enumerate(IoU_class):
+            print("class: {}, IoU: {:.2f}".format(i, iou))
+
+    
+    def test_speed(self, batch_size=24):
+        """Test the FPS obtained by this network.
+        """
+        print("test processing speed of the network.")
+        self.model.eval()
+        start_time = time.time()
+
+        for i in tqdm(range(30)):
+            image = torch.randn([batch_size,3,640,480])
+            if self.args.cuda:
+                image = image.cuda()
+            with torch.no_grad():
+                _ = self.model(image)
+
+        time_cost = time.time() - start_time
+        print("test process costs {:.1f} sec for {} images, FPS: {:.1f}".format(time_cost, batch_size*30, batch_size*30/time_cost))
+
 
     def validation(self, epoch):
         self.model.eval()
@@ -175,6 +224,25 @@ class Trainer(object):
                 'optimizer': self.optimizer.state_dict(),
                 'best_pred': self.best_pred,
             }, is_best)
+    
+    def load_ckpt(self, ckpt_dir="./run/construction/deeplab-resnet"):
+        filename = os.path.join(ckpt_dir, "model_best.pth.tar")
+
+        if not os.path.isfile(filename):
+            raise RuntimeError("=> no checkpoint found at '{}'" .format(filename))
+        checkpoint = torch.load(filename)
+        self.args.start_epoch = checkpoint['epoch']
+        if self.args.cuda:
+            self.model.module.load_state_dict(checkpoint['state_dict'])
+        else:
+            self.model.load_state_dict(checkpoint['state_dict'])
+        if not self.args.ft:
+            self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.best_pred = checkpoint['best_pred']
+        print("=> loaded checkpoint '{}' (epoch {})"
+                .format(filename, checkpoint['epoch']))
+        print("epoch: {} best pred mIoU: {}".format(checkpoint["epoch"], checkpoint["best_pred"]))
+        
 
 def main():
     parser = argparse.ArgumentParser(description="PyTorch DeeplabV3Plus Training")
@@ -237,7 +305,7 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     # checking point
-    parser.add_argument('--resume', type=str, default=None,
+    parser.add_argument('--resume', type=str, default="./run/construction/deeplab-resnet",
                         help='put the path to resuming file if needed')
     parser.add_argument('--checkname', type=str, default=None,
                         help='set the checkpoint name')
@@ -246,7 +314,7 @@ def main():
                         help='finetuning on a different dataset')
     # evaluation option
     parser.add_argument('--eval-interval', type=int, default=1,
-                        help='evaluuation interval (default: 1)')
+                        help='evaluation interval (default: 1)')
     parser.add_argument('--no-val', action='store_true', default=False,
                         help='skip validation during training')
 
@@ -270,7 +338,7 @@ def main():
             'coco': 30,
             'cityscapes': 200,
             'pascal': 50,
-            'construction': 30,
+            'construction': 50,
         }
         args.epochs = epoches[args.dataset.lower()]
 
@@ -294,15 +362,12 @@ def main():
         args.checkname = 'deeplab-'+str(args.backbone)
     print(args)
     torch.manual_seed(args.seed)
-    trainer = Trainer(args)
-    print('Starting Epoch:', trainer.args.start_epoch)
-    print('Total Epoches:', trainer.args.epochs)
-    for epoch in range(trainer.args.start_epoch, trainer.args.epochs):
-        trainer.training(epoch)
-        if not trainer.args.no_val and epoch % args.eval_interval == (args.eval_interval - 1):
-            trainer.validation(epoch)
 
-    trainer.writer.close()
+    evaler = Evaluater(args)
+    evaler.evaluate()
+    # evaler.test_speed()
+    pass
+
 
 if __name__ == "__main__":
-   main()
+    main()
